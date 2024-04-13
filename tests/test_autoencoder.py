@@ -38,13 +38,14 @@ model_parameters = {
     "reg_inner_layers": [16, 8],
     "reg_afn": "gelu",
     "reg_dropout": 0.1,
+    "device": "cpu",
 }
 autoencoder = autoencoder.Model(**model_parameters)
 
 # training
 training_parameters = {
     "batch_size": 64,
-    "max_epochs": 10,
+    "max_epochs": 20,
     "lr": 1e-5,
     "weight_decay": 5e-5,
     "stop_patience": 100,
@@ -57,7 +58,8 @@ autoencoder.fit(training_data, val_data, **training_parameters)
 loss, reg_loss, enc_loss = autoencoder.get_curves()
 
 
-plt.plot(loss)
+print(f"reg_loss={reg_loss[-1]}")
+# plt.plot(loss)
 plt.plot(reg_loss)
-plt.plot(enc_loss)
+# plt.plot(enc_loss)
 plt.show()

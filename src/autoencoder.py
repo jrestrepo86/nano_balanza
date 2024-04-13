@@ -63,7 +63,6 @@ class AutoEncoder(nn.Module):
         inner_layers,
         afn="gelu",
         dropout=0.1,
-        pe_max_len=5000,
     ):
         super(AutoEncoder, self).__init__()
 
@@ -113,7 +112,7 @@ class AutoEncoder(nn.Module):
         self.position_embedding = pe.unsqueeze(0)
 
     def forward(self, x):
-        pe = x + self.position_embedding.to(x.get_device())
+        pe = x + self.position_embedding.to(x.device)
         features = self.Encoder(pe)
         return self.Decoder(features), features
 
