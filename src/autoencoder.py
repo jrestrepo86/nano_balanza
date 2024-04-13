@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -193,6 +194,12 @@ class Model(nn.Module):
         opt_reg = torch.optim.Adam(
             self.reg.parameters(), lr=lr, weight_decay=weight_decay
         )
+        # schedulers
+        enc_scheduler = ReduceLROnPlateau(
+            opt_encoder, "min", factor=0.1, verbose=verbose
+        )
+        reg_scheduler = ReduceLROnPlateau(opt_reg, "min", factor=0.1, verbose=verbose)
+
         # loss
         auto_ecoder_loss = torch.nn.MSELoss()
         reg_loss = torch.nn.MSELoss()
@@ -244,6 +251,8 @@ class Model(nn.Module):
                 val_loss_epoch.append(val_loss.item())
                 val_reg_loss_epoch.append(val_reg_loss.item())
                 val_enc_loss_epoch.append(val_enc_loss.item())
+            enc_scheduler.step(val_loss)
+            reg_scheduler.step(val_loss)
 
         self.val_loss_epoch = np.array(val_loss_epoch)
         self.val_reg_loss_epoch = np.array(val_reg_loss_epoch)

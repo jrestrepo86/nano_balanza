@@ -38,16 +38,16 @@ model_parameters = {
     "reg_inner_layers": [16, 8],
     "reg_afn": "gelu",
     "reg_dropout": 0.1,
-    # "device": "cuda",
-    "device": "cpu",
+    "device": "cuda",
+    # "device": "cpu",
 }
 autoencoder = autoencoder.Model(**model_parameters)
 
 # training
 training_parameters = {
     "batch_size": 64,
-    "max_epochs": 20,
-    "lr": 1e-5,
+    "max_epochs": 100,
+    "lr": 1e-9,
     "weight_decay": 5e-5,
     "stop_patience": 100,
     "stop_min_delta": 0,
