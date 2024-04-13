@@ -38,6 +38,7 @@ model_parameters = {
     "reg_inner_layers": [16, 8],
     "reg_afn": "gelu",
     "reg_dropout": 0.1,
+    # "device": "cuda",
     "device": "cpu",
 }
 autoencoder = autoencoder.Model(**model_parameters)
