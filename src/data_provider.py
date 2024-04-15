@@ -46,7 +46,7 @@ class data_set(Dataset):
         )
 
         self.normalize = normalize_outs
-        self.data_len = n_samples
+        self.data_len = int(n_samples)
         self.mass_samples = (
             np.random.rand(n_samples, 3) * (max_mass - min_mass) + min_mass
         )

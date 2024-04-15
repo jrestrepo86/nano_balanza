@@ -1,7 +1,9 @@
+# scheduler
+# pip install schedulefree
 import numpy as np
+import schedulefree
 import torch
 import torch.nn as nn
-from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -89,7 +91,10 @@ class AutoEncoder(nn.Module):
                 nn.Linear(decoder_inner_layers[i], decoder_inner_layers[i + 1]),
                 activation_fn(),
             ]
-        decoder_seq += [nn.Linear(decoder_inner_layers[-1], input_dim)]
+        decoder_seq += [
+            nn.Linear(decoder_inner_layers[-1], input_dim),
+            get_activation_fn("relu")(),
+        ]
         self.Decoder = nn.Sequential(*decoder_seq)
         # dropout
         self.dropout = nn.Dropout(dropout)
@@ -169,6 +174,15 @@ class Model(nn.Module):
             self.autoEncoder.eval()
             self.reg.eval()
 
+    def save_model(self, path):
+        torch.save(self.state_dict(), path)
+        print("model saved")
+
+    def load_model(self, path):
+        self.load_state_dict(torch.load(path))
+        print("model loaded")
+        self.eval()
+
     def fit(
         self,
         train_dataset,
@@ -176,33 +190,19 @@ class Model(nn.Module):
         batch_size=64,
         max_epochs=2000,
         lr=1e-6,
-        weight_decay=5e-5,
-        stop_patience=100,
-        stop_min_delta=0,
         verbose=False,
         encoder_weight=0.5,
         reg_weight=0.5,
     ):
 
-        # optimizadores
-        # opt_encoder = torch.optim.RMSprop(
-        #     self.autoEncoder.parameters(), lr=lr, weight_decay=weight_decay
-        # )
-        opt_encoder = torch.optim.Adam(
-            self.autoEncoder.parameters(), lr=lr, weight_decay=weight_decay
-        )
-        opt_reg = torch.optim.Adam(
-            self.reg.parameters(), lr=lr, weight_decay=weight_decay
-        )
-        # schedulers
-        enc_scheduler = ReduceLROnPlateau(
-            opt_encoder, "min", factor=0.1, verbose=verbose
-        )
-        reg_scheduler = ReduceLROnPlateau(opt_reg, "min", factor=0.1, verbose=verbose)
+        # schedule free optimizers
+        lr = 10 * lr
+        opt_enc = schedulefree.AdamWScheduleFree(self.autoEncoder.parameters(), lr=lr)
+        opt_reg = schedulefree.AdamWScheduleFree(self.reg.parameters(), lr=lr)
 
         # loss
-        auto_ecoder_loss = torch.nn.MSELoss()
-        reg_loss = torch.nn.MSELoss()
+        enc_loss_fn = torch.nn.MSELoss()
+        reg_loss_fn = torch.nn.MSELoss()
 
         # Data
         self.train_loader = DataLoader(train_dataset, batch_size=batch_size)
@@ -216,16 +216,16 @@ class Model(nn.Module):
             self.model_state("train")
             with torch.set_grad_enabled(True):
                 for _, (mass, x) in enumerate(self.train_loader):
-                    opt_encoder.zero_grad()
+                    opt_enc.zero_grad()
                     opt_reg.zero_grad()
                     x = x.to(self.device)
                     mass = mass.to(self.device)
                     dec_out, est_mass = self.forward(x)
-                    loss_enc = auto_ecoder_loss(dec_out, x)
-                    loss_reg = reg_loss(mass, est_mass)
+                    loss_enc = enc_loss_fn(dec_out, x)
+                    loss_reg = reg_loss_fn(mass, est_mass)
                     loss = reg_weight * loss_reg + encoder_weight * loss_enc
                     loss.backward()
-                    opt_encoder.step()
+                    opt_enc.step()
                     opt_reg.step()
 
             # eval
@@ -238,8 +238,8 @@ class Model(nn.Module):
                     x = x.to(self.device)
                     mass = mass.to(self.device)
                     dec_out, est_mass = self.forward(x)
-                    loss_enc = auto_ecoder_loss(dec_out, x)
-                    loss_reg = reg_loss(mass, est_mass)
+                    loss_enc = enc_loss_fn(dec_out, x)
+                    loss_reg = reg_loss_fn(mass, est_mass)
                     loss = reg_weight * loss_reg + encoder_weight * loss_enc
                     val_loss.append(loss)
                     val_reg_loss.append(loss_reg)
@@ -251,8 +251,6 @@ class Model(nn.Module):
                 val_loss_epoch.append(val_loss.item())
                 val_reg_loss_epoch.append(val_reg_loss.item())
                 val_enc_loss_epoch.append(val_enc_loss.item())
-            enc_scheduler.step(val_loss)
-            reg_scheduler.step(val_loss)
 
         self.val_loss_epoch = np.array(val_loss_epoch)
         self.val_reg_loss_epoch = np.array(val_reg_loss_epoch)
@@ -260,3 +258,25 @@ class Model(nn.Module):
 
     def get_curves(self):
         return self.val_loss_epoch, self.val_reg_loss_epoch, self.val_enc_loss_epoch
+
+    def test_model(self, test_dataset):
+        test_loader = DataLoader(test_dataset, batch_size=1)
+        reg_loss_fn = torch.nn.MSELoss()
+
+        self.model_state("eval")
+        mass_array, est_mass_array, test_reg_loss = [], [], []
+
+        with torch.no_grad():
+            for _, (mass, x) in enumerate(test_loader):
+                x = x.to(self.device)
+                mass = mass.to(self.device)
+                _, est_mass = self.forward(x)
+                loss_reg = reg_loss_fn(mass, est_mass)
+                test_reg_loss.append(loss_reg.item())
+                mass_array.append(mass.detach().cpu())
+                est_mass_array.append(est_mass.detach().cpu())
+
+        test_reg_loss = np.array(test_reg_loss)
+        test_mass = np.array(mass_array)
+        test_est_mass = np.array(est_mass_array)
+        return test_reg_loss, test_mass, test_est_mass
