@@ -5,17 +5,6 @@ from torch.utils.data import Dataset
 from .nano_model import Resonators
 
 
-def toColVector(x):
-    """
-    Change vectors to column vectors
-    """
-    x = x.reshape(x.shape[0], -1)
-    if x.shape[0] < x.shape[1]:
-        x = x.T
-    x.reshape((-1, 1))
-    return x
-
-
 class data_set(Dataset):
     def __init__(
         self,
@@ -30,7 +19,7 @@ class data_set(Dataset):
         resonators_Cm=16.0371e-15,
         resonators_Rm=11.42,
         resonators_C0=43.3903e-12,
-        normalize_outs=False,
+        add_noise=None,
     ):
         super(data_set, self).__init__()
 
@@ -45,10 +34,10 @@ class data_set(Dataset):
             C0=resonators_C0,
         )
 
-        self.normalize = normalize_outs
+        self.add_noise = add_noise
         self.data_len = int(n_samples)
         self.mass_samples = (
-            np.random.rand(n_samples, 3) * (max_mass - min_mass) + min_mass
+            np.random.rand(self.data_len, 3) * (max_mass - min_mass) + min_mass
         )
 
     def __len__(self):
@@ -57,8 +46,8 @@ class data_set(Dataset):
     def __getitem__(self, index):
         mass = self.mass_samples[index]
         Ysim = self.resonator.simulate(mass[0], mass[1], mass[2])
-        if self.normalize:
-            Ysim = Ysim / Ysim.max()
+        if self.add_noise is not None:
+            Ysim = Ysim + torch.randn(Ysim.shape) * self.add_noise
         Ysim = torch.tensor(Ysim, dtype=torch.float)
         mass = torch.tensor(mass, dtype=torch.float)
         return mass, Ysim

@@ -49,7 +49,7 @@ class Regressor(nn.Module):
                 nn.Linear(inner_layers[i], inner_layers[i + 1]),
                 activation_fn(),
             ]
-        seq += [nn.Linear(inner_layers[-1], 3)]
+        seq += [nn.Linear(inner_layers[-1], 3), get_activation_fn("relu")()]
         self.model = nn.Sequential(*seq)
         # dropout
         self.dropout = nn.Dropout(dropout)
@@ -117,10 +117,14 @@ class AutoEncoder(nn.Module):
         # pe shape (1, seq_len, model_dim)
         self.position_embedding = pe.unsqueeze(0)
 
-    def forward(self, x):
-        pe = x + self.position_embedding.to(x.device)
+    def forward(self, espectro, just_encoder=False):
+        pe = espectro + self.position_embedding.to(espectro.device)
         features = self.Encoder(pe)
-        return self.Decoder(features), features
+        if just_encoder:
+            out_dec = []
+        else:
+            out_dec = self.Decoder(features)
+        return out_dec, features
 
 
 class Model(nn.Module):
@@ -161,8 +165,8 @@ class Model(nn.Module):
             dropout=reg_dropout,
         ).to(self.device)
 
-    def forward(self, espectro):
-        dec_out, features = self.autoEncoder(espectro)
+    def forward(self, espectro, just_encoder=False):
+        dec_out, features = self.autoEncoder(espectro, just_encoder)
         mass = self.reg(features)
         return dec_out, mass
 
@@ -189,14 +193,13 @@ class Model(nn.Module):
         val_dataset,
         batch_size=64,
         max_epochs=2000,
-        lr=1e-6,
+        lr=1e-4,
         verbose=False,
         encoder_weight=0.5,
         reg_weight=0.5,
     ):
 
         # schedule free optimizers
-        lr = 10 * lr
         opt_enc = schedulefree.AdamWScheduleFree(self.autoEncoder.parameters(), lr=lr)
         opt_reg = schedulefree.AdamWScheduleFree(self.reg.parameters(), lr=lr)
 
@@ -209,12 +212,12 @@ class Model(nn.Module):
         self.val_loader = DataLoader(val_dataset, batch_size=batch_size)
 
         # training
-        val_loss_epoch = []
-        val_reg_loss_epoch = []
-        val_enc_loss_epoch = []
-        for _ in tqdm(range(max_epochs), disable=not verbose):
+        train_loss_epoch, train_reg_loss_epoch, train_enc_loss_epoch = [], [], []
+        val_loss_epoch, val_reg_loss_epoch, val_enc_loss_epoch = [], [], []
+        for i in tqdm(range(max_epochs), disable=not verbose):
             self.model_state("train")
             with torch.set_grad_enabled(True):
+                train_loss, train_reg_loss, train_enc_loss = [], [], []
                 for _, (mass, x) in enumerate(self.train_loader):
                     opt_enc.zero_grad()
                     opt_reg.zero_grad()
@@ -224,16 +227,21 @@ class Model(nn.Module):
                     loss_enc = enc_loss_fn(dec_out, x)
                     loss_reg = reg_loss_fn(mass, est_mass)
                     loss = reg_weight * loss_reg + encoder_weight * loss_enc
+                    train_loss.append(loss)
+                    train_reg_loss.append(loss_reg)
+                    train_enc_loss.append(loss_enc)
                     loss.backward()
                     opt_enc.step()
                     opt_reg.step()
 
+                train_loss_epoch.append(torch.stack(train_loss).mean().item())
+                train_reg_loss_epoch.append(torch.stack(train_reg_loss).mean().item())
+                train_enc_loss_epoch.append(torch.stack(train_enc_loss).mean().item())
+
             # eval
             self.model_state("eval")
-            val_loss = []
-            val_reg_loss = []
-            val_enc_loss = []
             with torch.no_grad():
+                val_loss, val_reg_loss, val_enc_loss = [], [], []
                 for _, (mass, x) in enumerate(self.val_loader):
                     x = x.to(self.device)
                     mass = mass.to(self.device)
@@ -245,19 +253,39 @@ class Model(nn.Module):
                     val_reg_loss.append(loss_reg)
                     val_enc_loss.append(loss_enc)
 
-                val_loss = torch.stack(val_loss).mean()
-                val_reg_loss = torch.stack(val_reg_loss).mean()
-                val_enc_loss = torch.stack(val_enc_loss).mean()
-                val_loss_epoch.append(val_loss.item())
-                val_reg_loss_epoch.append(val_reg_loss.item())
-                val_enc_loss_epoch.append(val_enc_loss.item())
+                val_loss = torch.stack(val_loss).mean().item()
+                val_reg_loss = torch.stack(val_reg_loss).mean().item()
+                val_enc_loss = torch.stack(val_enc_loss).mean().item()
+                val_loss_epoch.append(val_loss)
+                val_reg_loss_epoch.append(val_reg_loss)
+                val_enc_loss_epoch.append(val_enc_loss)
+            text = (
+                f"Epoca {i}/{max_epochs} |"
+                + f"reg_loss={val_reg_loss} |"
+                + f"enc_loss={val_enc_loss} |"
+                + f"loss={val_loss}"
+            )
+            print(text)
 
         self.val_loss_epoch = np.array(val_loss_epoch)
         self.val_reg_loss_epoch = np.array(val_reg_loss_epoch)
         self.val_enc_loss_epoch = np.array(val_enc_loss_epoch)
+        self.train_loss_epoch = np.array(train_loss_epoch)
+        self.train_reg_loss_epoch = np.array(train_reg_loss_epoch)
+        self.train_enc_loss_epoch = np.array(train_enc_loss_epoch)
 
-    def get_curves(self):
-        return self.val_loss_epoch, self.val_reg_loss_epoch, self.val_enc_loss_epoch
+    def get_curves(self, all=False):
+        if all:
+            return (
+                self.train_loss_epoch,
+                self.train_reg_loss_epoch,
+                self.train_enc_loss_epoch,
+                self.val_loss_epoch,
+                self.val_reg_loss_epoch,
+                self.val_enc_loss_epoch,
+            )
+        else:
+            return self.val_loss_epoch, self.val_reg_loss_epoch, self.val_enc_loss_epoch
 
     def test_model(self, test_dataset):
         test_loader = DataLoader(test_dataset, batch_size=1)
@@ -270,7 +298,7 @@ class Model(nn.Module):
             for _, (mass, x) in enumerate(test_loader):
                 x = x.to(self.device)
                 mass = mass.to(self.device)
-                _, est_mass = self.forward(x)
+                _, est_mass = self.forward(x, just_encoder=True)
                 loss_reg = reg_loss_fn(mass, est_mass)
                 test_reg_loss.append(loss_reg.item())
                 mass_array.append(mass.detach().cpu())
