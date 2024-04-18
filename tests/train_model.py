@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src import autoencoder
+from src.model import Model
 from src.data_provider import data_set as resonator_data
 
 # data sets
@@ -40,12 +40,12 @@ model_parameters = {
     "device": "cuda",
     # "device": "cpu",
 }
-model = autoencoder.Model(**model_parameters)
+model = Model(**model_parameters)
 
 # Entrenar modelo
 training_parameters = {
     "batch_size": 512,
-    "max_epochs": 20,
+    "max_epochs": 10,
     "lr": 1e-3,
     "verbose": False,
 }
@@ -54,14 +54,14 @@ model.fit(training_data, val_data, **training_parameters)
 model_save_file = "../models/model_01"
 model.save_model(model_save_file)
 
-(train_loss, train_reg_loss, train_enc_loss, val_loss, val_reg_loss, val_enc_loss) = (
-    model.get_curves(all=True)
+(train_reg_loss, train_enc_loss, val_reg_loss, val_enc_loss) = model.get_curves(
+    all=True
 )
 
 
 print(f"train_reg_loss={train_reg_loss[-1]} | val_reg_loss={val_reg_loss[-1]}")
 
-fig, axs = plt.subplots(1, 3, sharex=False, sharey=False)
+fig, axs = plt.subplots(1, 2, sharex=False, sharey=False)
 axs[0].semilogy(train_reg_loss, label="train")
 axs[0].semilogy(val_reg_loss, label="val")
 axs[0].legend(loc="upper right")
@@ -69,9 +69,6 @@ axs[0].set_title("Reg loss")
 axs[1].semilogy(train_enc_loss, label="train")
 axs[1].semilogy(val_enc_loss, label="val")
 axs[1].set_title("Enc loss")
-axs[2].semilogy(train_loss, label="train")
-axs[2].semilogy(val_loss, label="val")
-axs[2].set_title("Loss")
 fig.suptitle("Validation losses")
 
 # testing
