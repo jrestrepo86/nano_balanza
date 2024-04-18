@@ -19,7 +19,6 @@ class data_set(Dataset):
         resonators_Cm=16.0371e-15,
         resonators_Rm=11.42,
         resonators_C0=43.3903e-12,
-        add_noise=None,
     ):
         super(data_set, self).__init__()
 
@@ -34,7 +33,6 @@ class data_set(Dataset):
             C0=resonators_C0,
         )
 
-        self.add_noise = add_noise
         self.data_len = int(n_samples)
         self.mass_samples = (
             np.random.rand(self.data_len, 3) * (max_mass - min_mass) + min_mass
@@ -46,8 +44,6 @@ class data_set(Dataset):
     def __getitem__(self, index):
         mass = self.mass_samples[index]
         Ysim = self.resonator.simulate(mass[0], mass[1], mass[2])
-        if self.add_noise is not None:
-            Ysim = Ysim + torch.randn(Ysim.shape) * self.add_noise
         Ysim = torch.tensor(Ysim, dtype=torch.float)
         mass = torch.tensor(mass, dtype=torch.float)
         return mass, Ysim

@@ -117,14 +117,14 @@ class AutoEncoder(nn.Module):
         # pe shape (1, seq_len, model_dim)
         self.position_embedding = pe.unsqueeze(0)
 
-    def forward(self, espectro, just_encoder=False):
-        pe = espectro + self.position_embedding.to(espectro.device)
-        features = self.Encoder(pe)
-        if just_encoder:
-            out_dec = []
-        else:
-            out_dec = self.Decoder(features)
+    def forward(self, espectro):
+        features = self.encoder(espectro)
+        out_dec = self.Decoder(features)
         return out_dec, features
+
+    def encoder(self, espectro):
+        espectro = espectro + self.position_embedding.to(espectro.device)
+        return self.Encoder(espectro)
 
 
 class Model(nn.Module):
@@ -158,25 +158,29 @@ class Model(nn.Module):
             dropout=encoder_dropout,
         ).to(self.device)
 
-        self.reg = Regressor(
+        self.regresor = Regressor(
             features_dim,
             inner_layers=reg_inner_layers,
             afn=reg_afn,
             dropout=reg_dropout,
         ).to(self.device)
 
-    def forward(self, espectro, just_encoder=False):
-        dec_out, features = self.autoEncoder(espectro, just_encoder)
-        mass = self.reg(features)
+    def forward(self, espectro):
+        dec_out, features = self.autoEncoder(espectro)
+        mass = self.regresor(features)
         return dec_out, mass
 
     def model_state(self, state="train"):
         if state == "train":
             self.autoEncoder.train()
-            self.reg.train()
+            self.regresor.train()
+            self.opt_enc.train()
+            self.opt_reg.train()
         if state == "eval":
             self.autoEncoder.eval()
-            self.reg.eval()
+            self.regresor.eval()
+            self.opt_enc.eval()
+            self.opt_reg.eval()
 
     def save_model(self, path):
         torch.save(self.state_dict(), path)
@@ -185,7 +189,6 @@ class Model(nn.Module):
     def load_model(self, path):
         self.load_state_dict(torch.load(path))
         print("model loaded")
-        self.eval()
 
     def fit(
         self,
@@ -195,13 +198,18 @@ class Model(nn.Module):
         max_epochs=2000,
         lr=1e-4,
         verbose=False,
-        encoder_weight=0.5,
-        reg_weight=0.5,
     ):
 
         # schedule free optimizers
-        opt_enc = schedulefree.AdamWScheduleFree(self.autoEncoder.parameters(), lr=lr)
-        opt_reg = schedulefree.AdamWScheduleFree(self.reg.parameters(), lr=lr)
+        self.opt_enc = schedulefree.AdamWScheduleFree(
+            self.autoEncoder.parameters(), lr=lr
+        )
+        self.opt_reg = schedulefree.AdamWScheduleFree(self.regresor.parameters(), lr=lr)
+
+        # self.opt_enc = schedulefree.SGDScheduleFree(
+        #     self.autoEncoder.parameters(), lr=lr
+        # )
+        # self.opt_reg = schedulefree.SGDScheduleFree(self.regresor.parameters(), lr=lr)
 
         # loss
         enc_loss_fn = torch.nn.MSELoss()
@@ -219,20 +227,20 @@ class Model(nn.Module):
             with torch.set_grad_enabled(True):
                 train_loss, train_reg_loss, train_enc_loss = [], [], []
                 for _, (mass, x) in enumerate(self.train_loader):
-                    opt_enc.zero_grad()
-                    opt_reg.zero_grad()
+                    self.opt_enc.zero_grad()
+                    self.opt_reg.zero_grad()
                     x = x.to(self.device)
                     mass = mass.to(self.device)
                     dec_out, est_mass = self.forward(x)
                     loss_enc = enc_loss_fn(dec_out, x)
                     loss_reg = reg_loss_fn(mass, est_mass)
-                    loss = reg_weight * loss_reg + encoder_weight * loss_enc
+                    loss = loss_reg + loss_enc
                     train_loss.append(loss)
                     train_reg_loss.append(loss_reg)
                     train_enc_loss.append(loss_enc)
                     loss.backward()
-                    opt_enc.step()
-                    opt_reg.step()
+                    self.opt_enc.step()
+                    self.opt_reg.step()
 
                 train_loss_epoch.append(torch.stack(train_loss).mean().item())
                 train_reg_loss_epoch.append(torch.stack(train_reg_loss).mean().item())
@@ -248,7 +256,7 @@ class Model(nn.Module):
                     dec_out, est_mass = self.forward(x)
                     loss_enc = enc_loss_fn(dec_out, x)
                     loss_reg = reg_loss_fn(mass, est_mass)
-                    loss = reg_weight * loss_reg + encoder_weight * loss_enc
+                    loss = loss_reg + loss_enc
                     val_loss.append(loss)
                     val_reg_loss.append(loss_reg)
                     val_enc_loss.append(loss_enc)
@@ -260,7 +268,7 @@ class Model(nn.Module):
                 val_reg_loss_epoch.append(val_reg_loss)
                 val_enc_loss_epoch.append(val_enc_loss)
             text = (
-                f"Epoca {i}/{max_epochs} |"
+                f"Epoca {i+1}/{max_epochs} |"
                 + f"reg_loss={val_reg_loss} |"
                 + f"enc_loss={val_enc_loss} |"
                 + f"loss={val_loss}"
@@ -298,7 +306,8 @@ class Model(nn.Module):
             for _, (mass, x) in enumerate(test_loader):
                 x = x.to(self.device)
                 mass = mass.to(self.device)
-                _, est_mass = self.forward(x, just_encoder=True)
+                features = self.autoEncoder.encoder(x)
+                est_mass = self.regresor(features)
                 loss_reg = reg_loss_fn(mass, est_mass)
                 test_reg_loss.append(loss_reg.item())
                 mass_array.append(mass.detach().cpu())
