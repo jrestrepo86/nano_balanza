@@ -21,7 +21,6 @@ data_parameters = {
     "resonators_Cm": 16.0371e-15,
     "resonators_Rm": 11.42,
     "resonators_C0": 43.3903e-12,
-    "add_noise": 1e-6,
 }
 nsamples = 20000
 training_data = resonator_data(nsamples, **data_parameters)
@@ -42,20 +41,20 @@ model_parameters = {
     "device": "cuda",
     # "device": "cpu",
 }
+print("Cargando modelo pre entrenando sin ruido")
 model = autoencoder.Model(**model_parameters)
 model.load_model(model_saved_file)  # cargar modelo entrenado sin ruido
 
 # Entrenar modelo con ruido
 training_parameters = {
     "batch_size": 512,
-    "max_epochs": 30,
-    "lr": 1e-4,
-    "encoder_weight": 0.5,
-    "reg_weight": 0.5,
+    "max_epochs": 3,
+    "lr": 1e-3,
     "verbose": False,
 }
+print("Entrenando con ruido")
 model.fit(training_data, val_data, **training_parameters)
-model_noise_save_file = "../models/model01_noise"
+model_noise_save_file = "../models/model_noise_01"
 model.save_model(model_noise_save_file)
 
 (train_loss, train_reg_loss, train_enc_loss, val_loss, val_reg_loss, val_enc_loss) = (
@@ -67,6 +66,7 @@ print(f"train_reg_loss={train_reg_loss[-1]} | val_reg_loss={val_reg_loss[-1]}")
 fig, axs = plt.subplots(1, 3, sharex=False, sharey=False)
 axs[0].semilogy(train_reg_loss, label="train")
 axs[0].semilogy(val_reg_loss, label="val")
+axs[0].legend(loc="lower right")
 axs[0].set_title("Reg loss")
 axs[1].semilogy(train_enc_loss, label="train")
 axs[1].semilogy(val_enc_loss, label="val")
@@ -76,9 +76,13 @@ axs[2].semilogy(val_loss, label="val")
 axs[2].set_title("Loss")
 fig.suptitle("Validation losses with Noise")
 
-# Test
+# testing
 test_data = resonator_data(0.2 * nsamples, **data_parameters)  # crear datos test
 test_reg_loss, mass, est_mass = model.test_model(test_data)  # hacer test
+print(
+    f"test_reg_loss_median={np.median(test_reg_loss)}, test_reg_loss_std={test_reg_loss.std()}"
+)
+
 fig, axs = plt.subplots(1, 2, sharex=False, sharey=False)
 axs[0].hist(test_reg_loss, bins=32)
 axs[1].boxplot(test_reg_loss)

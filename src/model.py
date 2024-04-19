@@ -77,32 +77,29 @@ class Model(nn.Module):
         val_dataset,
         batch_size=64,
         max_epochs=2000,
-        lr=1e-4,
+        enc_lr=1e-4,
+        reg_lr=1e-4,
         verbose=False,
     ):
 
         # schedule free optimizers
         self.opt_autoencoder = schedulefree.AdamWScheduleFree(
-            self.autoEncoder.parameters(), lr=10.0 * lr
+            self.autoEncoder.parameters(), lr=enc_lr
         )
         self.opt_regressor = schedulefree.AdamWScheduleFree(
-            self.regressor.parameters(), lr=lr
+            self.regressor.parameters(), lr=reg_lr
         )
-        # self.opt_encoder = schedulefree.AdamWScheduleFree(
-        #     self.autoEncoder.Encoder.parameters(), lr=lr
-        # )
 
-        # self.opt_enc = schedulefree.SGDScheduleFree(
-        #     self.autoEncoder.parameters(), lr=lr
+        # self.opt_autoencoder = schedulefree.SGDScheduleFree(
+        #     self.autoEncoder.parameters(), lr=enc_lr
         # )
         # self.opt_regressor = schedulefree.SGDScheduleFree(
-        #     self.regressor.parameters(), lr=lr
+        #     self.regressor.parameters(), lr=reg_lr
         # )
 
         # loss
         autoencoder_loss_fn = torch.nn.MSELoss()
-        regressor_loss_fn = torch.nn.L1Loss()
-        # regressor_loss_fn = torch.nn.MSELoss()
+        regressor_loss_fn = torch.nn.MSELoss()
 
         # Data
         self.train_loader = DataLoader(train_dataset, batch_size=batch_size)
@@ -116,6 +113,8 @@ class Model(nn.Module):
             self.model_state("train")
             with torch.set_grad_enabled(True):
                 for _, (mass, x) in enumerate(self.train_loader):
+                    self.opt_autoencoder.zero_grad()
+                    self.opt_regressor.zero_grad()
                     x, mass = x.to(self.device), mass.to(self.device)
                     dec_out, est_mass = self.forward(x)
                     loss_enc = autoencoder_loss_fn(dec_out, x)
@@ -123,11 +122,9 @@ class Model(nn.Module):
                     loss = loss_enc + loss_reg
                     train_enc_loss.append(loss_enc)
                     train_reg_loss.append(loss_reg)
-                    self.opt_autoencoder.zero_grad()
-                    self.opt_regressor.zero_grad()
                     loss.backward()
                     self.opt_autoencoder.step()
-                    self.opt_autoencoder.step()
+                    self.opt_regressor.step()
 
                 train_enc_loss_epoch.append(torch.stack(train_enc_loss).mean().item())
                 train_reg_loss_epoch.append(torch.stack(train_reg_loss).mean().item())
@@ -163,10 +160,10 @@ class Model(nn.Module):
     def get_curves(self, all=False):
         if all:
             return (
-                self.train_reg_loss_epoch,
-                self.train_enc_loss_epoch,
                 self.val_reg_loss_epoch,
                 self.val_enc_loss_epoch,
+                self.train_reg_loss_epoch,
+                self.train_enc_loss_epoch,
             )
         else:
             return self.val_reg_loss_epoch, self.val_enc_loss_epoch
@@ -177,7 +174,6 @@ class Model(nn.Module):
 
         self.model_state("eval")
         mass_array, est_mass_array, test_reg_loss = [], [], []
-
         with torch.no_grad():
             for _, (mass, x) in enumerate(test_loader):
                 x = x.to(self.device)

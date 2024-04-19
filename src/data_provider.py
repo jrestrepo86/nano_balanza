@@ -33,17 +33,21 @@ class data_set(Dataset):
             C0=resonators_C0,
         )
 
+        self.max_mass = max_mass
+        self.min_mass = min_mass
         self.data_len = int(n_samples)
-        self.mass_samples = (
-            np.random.rand(self.data_len, 3) * (max_mass - min_mass) + min_mass
-        )
+        # self.mass_samples = (
+        #     np.random.rand(self.data_len, 3) * (max_mass - min_mass) + min_mass
+        # )
+        # self.mass_samples = np.random.rand(self.data_len, 3)
 
     def __len__(self):
         return self.data_len
 
     def __getitem__(self, index):
-        mass = self.mass_samples[index]
-        Ysim = self.resonator.simulate(mass[0], mass[1], mass[2])
+        mass = np.random.rand(3)
+        m = mass * (self.max_mass - self.min_mass) + self.min_mass
+        Ysim = self.resonator.simulate(m[0], m[1], m[2])
         Ysim = torch.tensor(Ysim, dtype=torch.float)
         mass = torch.tensor(mass, dtype=torch.float)
         return mass, Ysim
